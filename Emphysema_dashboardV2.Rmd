@@ -21,10 +21,14 @@ library(pROC)
 library(RColorBrewer)
 library(vcd)
 
+# "H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/AI/18022022_ Emphysema_395_900HU.csv"
+# "H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/AI/150222_Emphysema_395_Aview_40.csv"
+# "H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/Manual/18022022_Emphysema_205_st_kernel.csv"
+
 ##############################    AI   ###############################
 
 ########### -900 HU ############
-Q_infect_raw_900 <- read.csv("H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/AI/18022022_ Emphysema_395_900HU.csv", sep = ",", header = T)
+Q_infect_raw_900 <- read.csv("18022022_ Emphysema_395_900HU.csv", sep = ",", header = T)
 
 sub_Q_infect_900 <- Q_infect_raw_900 %>%
   select(1, 3, 9, 20, 44, starts_with("Emphysema")) %>%
@@ -43,7 +47,7 @@ sub_Q_infect_900$PatientID <- sub("'", "", sub_Q_infect_900$PatientID)
 non_zero <- sub_Q_infect_900[sub_Q_infect_900$vol_WholeLungwithVessel != 0,]
 
 ######### -950 HU ##############
-Q_infect_raw_950 <- read.csv("H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/AI/150222_Emphysema_395_Aview_40.csv", sep = ",", header = T)
+Q_infect_raw_950 <- read.csv("150222_Emphysema_395_Aview_40.csv", sep = ",", header = T)
 
 sub_Q_infect_950 <- Q_infect_raw_950 %>%
   select(1, 3, 9, 20, 44, starts_with("Emphysema")) %>%
@@ -63,7 +67,7 @@ non_zero <- sub_Q_infect_950[sub_Q_infect_950$vol_WholeLungwithVessel != 0,]
 
 ###########################    Manual #################################
 
-Manual_raw <- read.csv("H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/Manual/18022022_Emphysema_205_st_kernel.csv", sep = ",", header = T)
+Manual_raw <- read.csv("18022022_Emphysema_205_st_kernel.csv", sep = ",", header = T)
 sub_manual <- Manual_raw %>%
   select(1,3,9, 22, 46, seq(75,83)) %>%
   rename_with(~ gsub( "X...DB_PatientId", "PatientID", .x)) %>%
