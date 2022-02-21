@@ -1,0 +1,385 @@
+---
+title: "Emphysema dashboard"
+author: "Dylan Mezach"
+output:
+  flexdashboard::flex_dashboard:
+  orientation: Rows
+  social: menu
+  source_code: embed
+runtime: shiny
+---
+
+```{r global, include=T}
+### Load dependencies ###
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(scales)
+library(shiny)
+library(DT)
+library(pROC)
+library(RColorBrewer)
+library(vcd)
+
+##############################    AI   ###############################
+
+########### -900 HU ############
+Q_infect_raw_900 <- read.csv("H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/AI/18022022_ Emphysema_395_900HU.csv", sep = ",", header = T)
+
+sub_Q_infect_900 <- Q_infect_raw_900 %>%
+  select(1, 3, 9, 20, 44, starts_with("Emphysema")) %>%
+  na.omit()
+
+colnames(sub_Q_infect_900) <- c("PatientID", colnames(sub_Q_infect_900)[2:length(colnames(sub_Q_infect_900))])
+
+sub_Q_infect_900 <- sub_Q_infect_900 %>%
+  rename_with(~ gsub("Emphysema_Volume", "",.x)) %>%
+  rename_with(~ gsub("..", "perc", .x, fixed = T)) %>%
+  rename_with(~ gsub("._", "_", .x, fixed = T)) %>%
+  rename_with(~ gsub(".cc", "vol", .x, fixed = T))
+
+sub_Q_infect_900$PatientID <- sub("'", "", sub_Q_infect_900$PatientID)
+
+non_zero <- sub_Q_infect_900[sub_Q_infect_900$vol_WholeLungwithVessel != 0,]
+
+######### -950 HU ##############
+Q_infect_raw_950 <- read.csv("H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/AI/150222_Emphysema_395_Aview_40.csv", sep = ",", header = T)
+
+sub_Q_infect_950 <- Q_infect_raw_950 %>%
+  select(1, 3, 9, 20, 44, starts_with("Emphysema")) %>%
+  na.omit()
+
+colnames(sub_Q_infect_950) <- c("PatientID", colnames(sub_Q_infect_950)[2:length(colnames(sub_Q_infect_950))])
+
+sub_Q_infect_950 <- sub_Q_infect_950 %>%
+  rename_with(~ gsub("Emphysema_Volume", "",.x)) %>%
+  rename_with(~ gsub("..", "perc", .x, fixed = T)) %>%
+  rename_with(~ gsub("._", "_", .x, fixed = T)) %>%
+  rename_with(~ gsub(".cc", "vol", .x, fixed = T))
+
+sub_Q_infect_950$PatientID <- sub("'", "", sub_Q_infect_950$PatientID)
+
+non_zero <- sub_Q_infect_950[sub_Q_infect_950$vol_WholeLungwithVessel != 0,]
+
+###########################    Manual #################################
+
+Manual_raw <- read.csv("H:/My Drive/iDNA Main Drive/3 Projects/ResearchProject_Mezach/Data/raw/Manual/18022022_Emphysema_205_st_kernel.csv", sep = ",", header = T)
+sub_manual <- Manual_raw %>%
+  select(1,3,9, 22, 46, seq(75,83)) %>%
+  rename_with(~ gsub( "X...DB_PatientId", "PatientID", .x)) %>%
+  rename_with(~ gsub( "X3D_HasEmphysema", "Manual_emphysema", .x)) %>%
+  rename_with(~ gsub( "X3D_EmphysemaSeverity", "Severity", .x))
+
+sub_manual$Manual_emphysema[which(sub_manual$X3D_EmphysemaType == "")] <- F
+sub_manual$Manual_emphysema[which(sub_manual$X3D_EmphysemaType != "")] <- T
+sub_manual$Severity[sub_manual$Severity == ""] <- "No emphysema"
+
+Data_def <- merge(sub_Q_infect_950, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+
+
+```
+
+Inputs {.sidebar}
+================================================================================
+```{r}
+
+selectInput("HU", label = h3("HU threshold"), 
+            choices = list("-950", "-900"),
+            width = "200px")
+
+selectInput("k", label = h3("kernel"), 
+            choices = list("All", "B31f", "B45f", "BONE", "D", "LUNG", "STANDARD"),
+            width = "200px")
+
+selectInput('f', label = h4("Feature to show for standard kernel"),
+            choices = c("Manual_emphysema", "Severity"))
+
+sliderInput("th", label = "Emphysema threshold", 
+            min = 0, 
+            max = 50,
+            value = 6,
+            step=1) 
+
+checkboxGroupInput("var", label = h3("Variables"),
+                   choices = names(Data_def),
+                   selected = c("PatientID", "DB_ConvolutionKernel", "perc_WholeLungwithoutVessel"),
+                   width = "200px")
+```
+
+```{r}
+reactive({
+})
+```
+
+
+Q-infect statistics
+================================================================================
+
+Row 
+--------------------------------------------------------------------------------
+### Data table
+
+```{r width = 600}
+
+DT::renderDT({
+  if(input$HU == "-900"){sub_Q_infect <- sub_Q_infect_900}
+  if(input$HU == "-950"){sub_Q_infect <- sub_Q_infect_950}
+
+Data_def <- merge(sub_Q_infect, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+  
+  ifelse(input$k != "All",
+         dat <- Data_def[Data_def$DB_ConvolutionKernel == input$k,input$var],
+         dat <- Data_def[,input$var])
+  DT::datatable(dat, extensions=c('FixedColumns','Buttons', 'ColReorder','Scroller'),
+                options = list(scrollY="70vh", paging = F,autoWidth = TRUE, searchHighlight = TRUE),
+                class = 'white-space: nowrap',
+                selection = "multiple",
+                caption = "*Bold values represent exceeding % emphysema threshold") %>%
+    formatStyle("perc_WholeLungwithoutVessel",
+                fontWeight = styleInterval(input$th, c("normal", "bold")))
+  
+}) 
+
+
+```
+
+### Summary severity assesment
+
+```{r width = 600}
+
+DT::renderDT({
+  if(input$HU == "-900"){sub_Q_infect <- sub_Q_infect_900}
+  if(input$HU == "-950"){sub_Q_infect <- sub_Q_infect_950}
+  Data_def <- merge(sub_Q_infect, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+  
+  sev <- as.data.frame(table(Data_def$Severity))
+  DT::datatable(sev, colnames = c("Severity", "Frequency"))
+  
+})
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Barplot Emphysema percentage
+
+```{r}
+
+renderPlotly({
+  
+  if(input$HU == "-900"){sub_Q_infect <- sub_Q_infect_900}
+  if(input$HU == "-950"){sub_Q_infect <- sub_Q_infect_950}
+  Data_def <- merge(sub_Q_infect, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+  
+  if(input$k != "All"){
+    nth <- sum(Data_def$DB_ConvolutionKernel == input$k & Data_def$`perc_WholeLungwithoutVessel` > input$th) # calculate number of cases above threshold
+    t <- nrow(Data_def[Data_def$DB_ConvolutionKernel == input$k,])
+    
+    if(input$k == "STANDARD"){
+      
+      # pal <- c("#A6CEE3", "#1F78B4", "#B2DF8A", "#E31A1C", "#33A02C", "#FB9A99")
+      dat <- Data_def[Data_def$DB_ConvolutionKernel == input$k,]
+      g <- ggplot(dat) +
+        aes(x = PatientID, fill = factor(dat[,input$f]), weight = `perc_WholeLungwithoutVessel`) +
+        geom_hline(yintercept=input$th, linetype='dotted', col = 'red')+
+        geom_bar() +
+        scale_fill_hue(input$f, direction = 1) +
+        labs(x = "Cases", y = "Percentage emphysema",
+             title = paste0("Whole lung percentage emphysema - Kernel: ", input$k)) +
+        theme_minimal() 
+      
+      ggplotly(g) %>%
+        layout(title = list(text = paste0('Whole lung percentage emphysema - Kernel: ',
+                                          input$k,
+                                          '<br>',
+                                          '<sup>',
+                                          "Number of cases above emphysema threshold: ",nth, " out of ", t,
+                                          '</sup>')),
+               xaxis = list(showticklabels = F)) %>% config(displayModeBar = F)}
+    else{
+      
+      dat <- Data_def[Data_def$DB_ConvolutionKernel == input$k,]
+      g <- ggplot(dat) +
+        aes(x = PatientID, fill = Manual_emphysema, weight = `perc_WholeLungwithoutVessel`) +
+        geom_hline(yintercept=input$th, linetype='dotted', col = 'red')+
+        geom_bar(fill = "#add8e6") +
+        scale_fill_hue(direction = 1) +
+        labs(x = "Cases", y = "Percentage emphysema",
+             title = paste0("Whole lung percentage emphysema - Kernel: ", input$k)) +
+        theme_minimal() +
+        ylim(0,70)
+      
+      ggplotly(g) %>%
+        layout(title = list(text = paste0('Whole lung percentage emphysema - Kernel: ',
+                                          input$k,
+                                          '<br>',
+                                          '<sup>',
+                                          "Number of cases above emphysema threshold: ",nth," out of ", t,
+                                          '</sup>')),
+               xaxis = list(showticklabels = F)) %>% config(displayModeBar = F)}} 
+  else {
+    nth <- sum(Data_def$`perc_WholeLungwithoutVessel` > input$th)
+    t <- nrow(Data_def)
+    dat <- Data_def
+    g <- ggplot(dat) +
+      aes(x = PatientID, fill = DB_ConvolutionKernel, weight = `perc_WholeLungwithoutVessel`) +
+      geom_hline(yintercept=input$th, linetype='dotted', col = 'red')+
+      geom_bar() +
+      scale_fill_hue(direction = 1) +
+      labs(x = "Cases", y = "Percentage emphysema based on AI") +
+      facet_wrap(~ DB_ConvolutionKernel, scales="free")+
+      theme_minimal() +
+      ylim(0,70)
+    
+    ggplotly(g) %>%
+      layout(title = list(text = paste0('Whole lung percentage emphysema per kernel',
+                                        '<br>',
+                                        '<sup>',
+                                        paste0("Number of cases above emphysema threshold: ",nth, " out of ", t,
+                                               '</sup>'))),
+             xaxis = list(showticklabels = FALSE),
+             xaxis2 = list(showticklabels = FALSE),
+             xaxis3 = list(showticklabels = FALSE),
+             xaxis4 = list(showticklabels = FALSE),
+             xaxis5 = list(showticklabels = FALSE),
+             xaxis6 = list(showticklabels = FALSE),
+             showlegend = F) %>% config(displayModeBar = F)}})
+
+```
+
+
+
+Performance
+================================================================================
+
+Row
+--------------------------------------------------------------------------------
+### AUC
+
+```{r}
+
+Data_def_950 <- merge(sub_Q_infect_950, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+st_samples_950 <- Data_def_950[Data_def_950$DB_ConvolutionKernel == "STANDARD",]
+Data_def_900 <- merge(sub_Q_infect_900, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+st_samples_900 <- Data_def_900[Data_def_900$DB_ConvolutionKernel == "STANDARD",]
+
+man_samples_900 <- st_samples_900[!is.na(st_samples_900$Manual_emphysema),]
+man_samples_950 <- st_samples_950[!is.na(st_samples_950$Manual_emphysema),]
+
+
+ROC_950 <- plot.roc(man_samples_950$Manual_emphysema, man_samples_950$perc_WholeLungwithoutVessel,
+                xlab="False Positive Percentage", ylab="True Postive Percentage",
+                legacy.axes = T,
+                col = "#377eb8",
+                print.auc = T,
+                print.auc.x = 25,
+                print.auc.y = 40,
+                main="Statistical comparison",
+                percent=TRUE)
+
+ROC_900 <- lines.roc(man_samples_900$Manual_emphysema, man_samples_900$perc_WholeLungwithoutVessel,
+                     percent = T,
+                     col="#008600")
+
+
+test.obj <- roc.test(ROC_950, ROC_900)
+text(25, 45, labels=paste("p-value =", format.pval(test.obj$p.value)), adj=c(0, .5))
+text(10, 30, labels=paste0("AUC: ", round(ROC_900$auc, digits = 1), "%"), col = "#008600")
+legend("bottomright", legend=c("-950 HU", "-900 HU"), col=c("#1c61b6", "#008600"), lwd=2)
+
+```
+
+### Piechart
+```{r}
+renderPlot({
+  
+  if(input$HU == "-900"){sub_Q_infect <- sub_Q_infect_900}
+  if(input$HU == "-950"){sub_Q_infect <- sub_Q_infect_950}
+  Data_def <- merge(sub_Q_infect, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+  
+  cutoff = input$th
+  
+  PP = length(which(Data_def$`perc_WholeLungwithoutVessel` > cutoff))
+  PN = length(which(Data_def$`perc_WholeLungwithoutVessel` < cutoff))
+  P = length(which(Data_def$Manual_emphysema == T))
+  N = length(which(Data_def$Manual_emphysema == F))
+  Tot = P + N
+  
+  FN = length(which(Data_def$`perc_WholeLungwithoutVessel` < cutoff & Data_def$Manual_emphysema == T))
+  FP = length(which(Data_def$`perc_WholeLungwithoutVessel` > cutoff & Data_def$Manual_emphysema == F))
+  TN = length(which(Data_def$`perc_WholeLungwithoutVessel` < cutoff & Data_def$Manual_emphysema == F))
+  TP = length(which(Data_def$`perc_WholeLungwithoutVessel` > cutoff & Data_def$Manual_emphysema == T))
+  
+  
+  sensitivity = TP / (TP + FN)
+  specificity = TN / (TN + FP)
+  
+  Piechart <- data.frame(
+    group=c("FN", "FP", "TN", "TP"),
+    value=c(FN, FP, TN, TP))
+  
+  Pie_data <- Piechart %>%
+    arrange(desc(group)) %>%
+    mutate(prop = value / sum(Piechart$value) *100) %>%
+    mutate(ypos = cumsum(prop)- 0.5*prop )
+  
+  ggplot(Pie_data, aes(x="", y=prop, fill=group)) +
+    geom_bar(stat="identity", width=1, color="white") +
+    coord_polar("y", start=0) +
+    labs(caption = paste0("Cutoff: > ",cutoff,
+                          "%\nSensitivity: ", round(sensitivity,3), 
+                          "\nSpecificity: ", round(specificity,3), 
+                          "\nNumber of samples: ", nrow(sub_manual))) + 
+    theme_void() + 
+    theme(legend.position="none",
+          plot.caption = element_text(size = 15)) +
+    
+    geom_text(aes(y = ypos, label = group), color = "white", size=6) +
+    scale_fill_brewer(palette="RdYlBu")})
+
+```
+
+Row
+--------------------------------------------------------------------------------
+### Confusion matrix
+
+```{r}
+DT::renderDT({
+  
+  if(input$HU == "-900"){sub_Q_infect <- sub_Q_infect_900}
+  if(input$HU == "-950"){sub_Q_infect <- sub_Q_infect_950}
+  Data_def <- merge(sub_Q_infect, sub_manual[,c(1,6,10)], by = 1, all.x = T)
+  
+  
+  cutoff = input$th
+  
+  PP = length(which(Data_def$`perc_WholeLungwithoutVessel` > cutoff & is.na(Data_def$Manual_emphysema) == F))
+  PN = length(which(Data_def$`perc_WholeLungwithoutVessel` < cutoff & is.na(Data_def$Manual_emphysema) == F))
+  P = length(which(Data_def$Manual_emphysema == T))
+  N = length(which(Data_def$Manual_emphysema == F))
+  Tot = P + N
+  
+  FN = length(which(Data_def$`perc_WholeLungwithoutVessel` < cutoff & Data_def$Manual_emphysema == T))
+  FP = length(which(Data_def$`perc_WholeLungwithoutVessel` > cutoff & Data_def$Manual_emphysema == F))
+  TN = length(which(Data_def$`perc_WholeLungwithoutVessel` < cutoff & Data_def$Manual_emphysema == F))
+  TP = length(which(Data_def$`perc_WholeLungwithoutVessel` > cutoff & Data_def$Manual_emphysema == T))
+  
+  row1 <- c(Tot, PP, PN)
+  row2 <- c(P, TP, FN)
+  row3 <- c(N, FP ,TN)
+  cross_table <- as.data.frame(rbind(row1, row2, row3))
+  
+  
+  DT::datatable(cross_table, 
+                colnames =c("", "AI percentage > emphysema threshold","AI percentage < emphysema threshold"), 
+                rownames = c("Total", "Emphyesma positive", "Emphysema negative"), 
+                caption = paste0("Weighted Kappa: ", round(kappa(cross_table[2:3,2:3]), digits = 2), " with cutoff: > ", input$th, "%" ))
+  
+})
+
+```
+
+### Test3
+```{r}
+
+```
